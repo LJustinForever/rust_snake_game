@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 bevy = "0.13.0"
 bevy_ascii_terminal = "0.14.0"
+bevy_framepace = "0.15.0"
 
 [profile.dev.package."*"]
 opt-level = 3
