@@ -18,6 +18,7 @@ enum Direction {
     Right
 }
 
+
 #[derive(Component)]
 struct Snake{
     is_dead: bool,
@@ -34,8 +35,8 @@ struct Tail{
 struct Food;
 
 fn get_food_position(snake_position : Vec3) -> (f32, f32) {
-    let spawnable_area_width = WINDOW_WIDTH - SQUARE_THICKNESS * 2.0;
-    let spawnable_area_height = WINDOW_HEIGHT - SQUARE_THICKNESS * 2.0;
+    let spawnable_area_width = WINDOW_WIDTH - SQUARE_THICKNESS * 3.0;
+    let spawnable_area_height = WINDOW_HEIGHT - SQUARE_THICKNESS * 3.0;
 
     let mut x : f32 = 0.0;
     let mut y : f32 = 0.0;
@@ -129,7 +130,7 @@ fn move_snake(mut query: Query<(&Direction, &mut Transform, &mut Snake), With<Sn
             Direction::Left => transform.translation.x -= 10.0,
             Direction::Right => transform.translation.x += 10.0,
         }
-        //Move tails
+        //Move tail positions
         for tail_position in snake.tail_positions.iter_mut(){
             let temp = Clone::clone(tail_position);
             tail_position.x = previous_x;
@@ -150,11 +151,11 @@ fn move_tails(mut tail_query: Query<(&mut Transform, &Tail), Without<Snake>>, mu
     }
 }
 
-fn handle_border_collisions( mut snake_query : Query<(Entity, &Transform, &mut Snake)>){
-    for(_snake_entity, snake_transform, mut snake) in snake_query.iter_mut(){
+fn handle_snake_collisions( mut snake_query : Query<(&Transform, &mut Snake)>){
+    for(snake_transform, mut snake) in snake_query.iter_mut(){
         let snake_position = snake_transform.translation;
-        println!("Snake Y:{:?}", snake_position.y);
-        println!("Snake X:{:?}", snake_position.x);
+        // println!("Snake Y:{:?}", snake_position.y);
+        // println!("Snake X:{:?}", snake_position.x);
 
         //Check border collision
         let hit_vertical_border = ((snake_position.y + SQUARE_THICKNESS/ 2.0) >= MathHelper::round(WINDOW_HEIGHT / 2.0 - SQUARE_THICKNESS, 1))
@@ -162,9 +163,18 @@ fn handle_border_collisions( mut snake_query : Query<(Entity, &Transform, &mut S
         let hit_horizontal_border = ((snake_position.x + SQUARE_THICKNESS / 2.0) >= MathHelper::round(WINDOW_WIDTH / 2.0 - SQUARE_THICKNESS, 1))
                                         || ((snake_position.x - SQUARE_THICKNESS / 2.0) <= MathHelper::round(-(WINDOW_WIDTH / 2.0 - SQUARE_THICKNESS), 1));
 
-        snake.is_dead = hit_horizontal_border || hit_vertical_border;
+        let mut hit_tail = false;
+        for tail_positions in snake.tail_positions.iter().skip(1) {
+            hit_tail = snake_position.distance(*tail_positions) < 10.0;
+            if hit_tail {
+                println!("HIT TAIL");
+                break;
+            }
+        }
+
+        snake.is_dead = hit_horizontal_border || hit_vertical_border || hit_tail;
         if snake.is_dead {
-            println!("Hit border");
+            println!("Died");
             return;
         }
     }
@@ -174,11 +184,13 @@ fn handle_food_collision(mut food_query : Query<(&mut Transform, &Food), Without
 mut snake_query : Query<(&Transform, &mut Snake), Without<Food>>,
 mut commands: Commands,
 mut meshes: ResMut<Assets<Mesh>>,
-mut materials: ResMut<Assets<ColorMaterial>>){
+mut materials: ResMut<Assets<ColorMaterial>>,
+mut settings: ResMut<bevy_framepace::FramepaceSettings>){
     for (snake_transform, mut snake) in snake_query.iter_mut(){
         for (mut food_transform, _food) in food_query.iter_mut(){
             //Eat food
             if snake_transform.translation.distance(food_transform.translation) < SQUARE_THICKNESS {
+                println!("FOOD ATE");
                 //Change food position
                 let position = get_food_position(snake_transform.translation);
                 food_transform.translation.x = position.0;
@@ -188,13 +200,28 @@ mut materials: ResMut<Assets<ColorMaterial>>){
                 snake.length += 1;
 
                 let tail = Mesh2dHandle(meshes.add(Rectangle::new(SQUARE_THICKNESS, SQUARE_THICKNESS)));
-                commands.spawn((Tail{length: snake.length}, MaterialMesh2dBundle{
-                    mesh: tail,
-                    material: materials.add(Color::rgb(0.0,1.0,0.0)),
-                    transform: Transform::from_translation(snake_transform.translation),
-                    ..default()
-                }));
-                snake.tail_positions.push(snake_transform.translation);
+                if snake.tail_positions.len() == 0{
+                    commands.spawn((Tail{length: snake.length}, MaterialMesh2dBundle{
+                        mesh: tail,
+                        material: materials.add(Color::rgb(0.0,1.0,0.0)),
+                        transform: Transform::from_translation(snake_transform.translation),
+                        ..default()
+                    }));
+                    snake.tail_positions.push(snake_transform.translation);
+                }
+                else{
+                    commands.spawn((Tail{length: snake.length}, MaterialMesh2dBundle{
+                        mesh: tail,
+                        material: materials.add(Color::rgb(0.0,1.0,0.0)),
+                        transform: Transform::from_translation(Clone::clone(snake.tail_positions.get(snake.tail_positions.len() - 1).unwrap())),
+                        ..default()
+                    }));
+                    let pos = Clone::clone(snake.tail_positions.get(snake.tail_positions.len() - 1).unwrap());
+                    snake.tail_positions.push(pos);
+                }
+                
+                //Increase game speed
+                settings.limiter = Limiter::from_framerate(10.0 + snake.length as f64);
             }
         }
     }
@@ -232,12 +259,13 @@ fn main() {
           .add_systems(Startup, setup)
           .add_systems(Startup, generate_borders)
           .add_systems(Startup, (spawn_snake, spawn_food))
-          .add_systems(Update, (handle_border_collisions,
+          .add_systems(Update, (
                                                 handle_food_collision,
                                                 handle_snake_death,
                                                 handle_input,
                                                 move_snake,
-                                                move_tails
+                                                move_tails,
+                                                handle_snake_collisions,
                                                 ))
           .run();
 }
