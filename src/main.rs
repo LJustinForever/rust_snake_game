@@ -20,7 +20,14 @@ enum Direction {
 
 #[derive(Component)]
 struct Snake{
-    is_dead: bool
+    is_dead: bool,
+    length : i32,
+    tail_positions : Vec<Vec3>
+}
+
+#[derive(Component)]
+struct Tail{
+    length : i32
 }
 
 #[derive(Component)]
@@ -87,7 +94,7 @@ fn generate_borders(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mu
 
 fn spawn_snake(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>){
     let cube = Mesh2dHandle(meshes.add(Rectangle::new(SQUARE_THICKNESS, SQUARE_THICKNESS)));
-    commands.spawn((Snake{ is_dead: false}, Direction::Up, MaterialMesh2dBundle{
+    commands.spawn((Snake{ is_dead: false, tail_positions: Vec::new(), length: 0}, Direction::Up, MaterialMesh2dBundle{
         mesh: cube,
         material: materials.add(Color::rgb(0.0,1.0,0.0)),
         transform: Transform::from_xyz(0.0, 0.0, 0.0),
@@ -112,25 +119,40 @@ fn handle_input(keys: Res<ButtonInput<KeyCode>>, mut query: Query<&mut Direction
     }
 }
 
-fn move_snake(mut query: Query<(&Direction, &mut Transform), With<Snake>>){
-    for (direction, mut transform) in query.iter_mut(){
+fn move_snake(mut query: Query<(&Direction, &mut Transform, &mut Snake), With<Snake>>){
+    for (direction, mut transform, mut snake) in query.iter_mut(){
+        let mut previous_x : f32 = transform.translation.x;
+        let mut previous_y : f32 = transform.translation.y;
         match *direction{
             Direction::Up => transform.translation.y += 10.0,
             Direction::Down => transform.translation.y -= 10.0,
             Direction::Left => transform.translation.x -= 10.0,
             Direction::Right => transform.translation.x += 10.0,
         }
+        //Move tails
+        for tail_position in snake.tail_positions.iter_mut(){
+            let temp = Clone::clone(tail_position);
+            tail_position.x = previous_x;
+            tail_position.y = previous_y;
+            previous_x = temp.x;
+            previous_y = temp.y;
+        }
     }
 }
 
-fn handle_collisions( mut snake_param: ParamSet<(
-    Query<(Entity, &Transform, &mut Snake)>,
-    Query<(Entity, &mut Transform), With<Food>>,
-)>){
-    let mut snake_query = snake_param.p0();
-    let mut snake_position : Vec3 = Vec3::new(0.0, 0.0, 0.0);
+fn move_tails(mut tail_query: Query<(&mut Transform, &Tail), Without<Snake>>, mut snake_query : Query<&Snake, Without<Tail>>){
+    for snake in snake_query.iter_mut(){
+        for (mut tail_transform, tail) in tail_query.iter_mut(){
+            let tail_position = snake.tail_positions.get((tail.length - 1) as usize).unwrap();
+            tail_transform.translation.x = tail_position.x;
+            tail_transform.translation.y = tail_position.y;
+        }
+    }
+}
+
+fn handle_border_collisions( mut snake_query : Query<(Entity, &Transform, &mut Snake)>){
     for(_snake_entity, snake_transform, mut snake) in snake_query.iter_mut(){
-        snake_position = snake_transform.translation;
+        let snake_position = snake_transform.translation;
         println!("Snake Y:{:?}", snake_position.y);
         println!("Snake X:{:?}", snake_position.x);
 
@@ -146,15 +168,34 @@ fn handle_collisions( mut snake_param: ParamSet<(
             return;
         }
     }
-    let mut food_query = snake_param.p1();
-    for (_food_entity, mut food_transform,) in food_query.iter_mut(){
-        if snake_position.distance(food_transform.translation) < SQUARE_THICKNESS {
+}
 
-            //Change food position
-            let position = get_food_position(snake_position);
-            food_transform.translation.x = position.0;
-            food_transform.translation.y = position.1;
-            //Handle snake growth;
+fn handle_food_collision(mut food_query : Query<(&mut Transform, &Food), Without<Snake>>,
+mut snake_query : Query<(&Transform, &mut Snake), Without<Food>>,
+mut commands: Commands,
+mut meshes: ResMut<Assets<Mesh>>,
+mut materials: ResMut<Assets<ColorMaterial>>){
+    for (snake_transform, mut snake) in snake_query.iter_mut(){
+        for (mut food_transform, _food) in food_query.iter_mut(){
+            //Eat food
+            if snake_transform.translation.distance(food_transform.translation) < SQUARE_THICKNESS {
+                //Change food position
+                let position = get_food_position(snake_transform.translation);
+                food_transform.translation.x = position.0;
+                food_transform.translation.y = position.1;
+    
+                //Handle snake growth;
+                snake.length += 1;
+
+                let tail = Mesh2dHandle(meshes.add(Rectangle::new(SQUARE_THICKNESS, SQUARE_THICKNESS)));
+                commands.spawn((Tail{length: snake.length}, MaterialMesh2dBundle{
+                    mesh: tail,
+                    material: materials.add(Color::rgb(0.0,1.0,0.0)),
+                    transform: Transform::from_translation(snake_transform.translation),
+                    ..default()
+                }));
+                snake.tail_positions.push(snake_transform.translation);
+            }
         }
     }
 }
@@ -185,47 +226,18 @@ fn spawn_food(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
     }));
 }
 
-// fn spawn_food(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>, mut snake_query : Query<&Transform, With<Snake>>, mut food_query : Query<&Food>){
-//     let mut snake_position: Vec3 = Vec3::new(0.0, 0.0, 0.0);
-//     for transform in snake_query.iter_mut(){
-//         snake_position = transform.translation;
-//     }
-//     for food in food_query.iter_mut(){
-//         if !food.is_eaten{
-//             let spawnable_area_width = WINDOW_WIDTH - SQUARE_THICKNESS * 2.0;
-//             let spawnable_area_height = WINDOW_HEIGHT - SQUARE_THICKNESS * 2.0;
-    
-//             let mut x : f32 = 0.0;
-//             let mut y : f32 = 0.0;
-    
-//             while (x == snake_position.x || x == 0.0) && (y == snake_position.y || y == 0.0){
-//                 let mut rng = rand::thread_rng();
-//                 x = rng.gen_range(-spawnable_area_width / 2.0..spawnable_area_width / 2.0);
-//                 y = rng.gen_range(-spawnable_area_height / 2.0..spawnable_area_height / 2.0);
-//             }
-            
-//             let food_mesh = Mesh2dHandle(meshes.add(Rectangle::new(SQUARE_THICKNESS, SQUARE_THICKNESS)));
-    
-//             commands.spawn((Food{is_eaten: false}, MaterialMesh2dBundle{
-//                 mesh: food_mesh,
-//                 material: materials.add(Color::rgb(1.0, 1.0, 1.0)),
-//                 transform: Transform::from_xyz(x, y, 0.0),
-//                 ..default()
-//             }));
-//         }
-//     }
-// }
-
 fn main() {
     App::new()
           .add_plugins((CustomPlugin, bevy_framepace::FramepacePlugin))
           .add_systems(Startup, setup)
           .add_systems(Startup, generate_borders)
           .add_systems(Startup, (spawn_snake, spawn_food))
-          .add_systems(Update, (handle_collisions,
+          .add_systems(Update, (handle_border_collisions,
+                                                handle_food_collision,
                                                 handle_snake_death,
                                                 handle_input,
                                                 move_snake,
+                                                move_tails
                                                 ))
           .run();
 }
