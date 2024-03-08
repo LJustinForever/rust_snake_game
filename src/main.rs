@@ -247,7 +247,7 @@ fn spawn_food(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mate
 
     commands.spawn((Food, MaterialMesh2dBundle{
         mesh: food_mesh,
-        material: materials.add(Color::rgb(1.0, 1.0, 1.0)),
+        material: materials.add(Color::rgb(1.0, 0.0, 0.0)),
         transform: Transform::from_xyz(position.0, position.1, 0.0),
         ..default()
     }));
